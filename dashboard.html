@@ -1,0 +1,879 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Log Analysis Dashboard</title>
+    <style>
+      :root {
+        --bg: #0b1220;
+        --card: #131c2e;
+        --border: #22314d;
+        --text: #e7ecf5;
+        --muted: #93a1bd;
+        --accent: #5b8def;
+        --accent2: #57c58a;
+        --accent3: #e0616b;
+        --accent4: #b085e8;
+        padding-top: env(safe-area-inset-top, 0px);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+      @media (prefers-color-scheme: light) {
+        :root:not([data-theme='light']):not([data-theme='dark']) {
+          --bg: #f4f6fb;
+          --card: #ffffff;
+          --border: #e2e7f0;
+          --text: #161c2c;
+          --muted: #5b6478;
+        }
+      }
+      :root[data-theme='light'] {
+        --bg: #f4f6fb;
+        --card: #ffffff;
+        --border: #e2e7f0;
+        --text: #161c2c;
+        --muted: #5b6478;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-padding-top: env(safe-area-inset-top, 0px);
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
+          Arial, sans-serif;
+        min-height: 100%;
+      }
+      header {
+        padding: 28px 24px 18px;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      header h1 {
+        margin: 0 0 4px;
+        font-size: 1.6rem;
+        font-weight: 700;
+      }
+      header p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+      .badges {
+        margin-top: 12px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .badge {
+        background: var(--card);
+        border: 1px solid var(--border);
+        color: var(--muted);
+        padding: 5px 12px;
+        border-radius: 999px;
+        font-size: 0.8rem;
+      }
+      main {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 24px 40px;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 14px;
+        margin-bottom: 24px;
+      }
+      .stat {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 18px;
+      }
+      .stat .num {
+        font-size: 1.7rem;
+        font-weight: 700;
+      }
+      .stat .label {
+        color: var(--muted);
+        font-size: 0.85rem;
+        margin-top: 4px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+        gap: 18px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 20px;
+        overflow: hidden;
+      }
+      .card h2 {
+        margin: 0 0 14px;
+        font-size: 1.05rem;
+      }
+      .chart-wrap {
+        position: relative;
+        height: 280px;
+      }
+      .chart-wrap canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      .wide {
+        grid-column: 1 / -1;
+      }
+      .wide .chart-wrap {
+        height: 220px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+      tbody tr:hover {
+        background: rgba(91, 141, 239, 0.08);
+      }
+      .table-scroll {
+        max-height: 280px;
+        overflow-y: auto;
+        overflow-x: auto;
+      }
+      footer {
+        text-align: center;
+        color: var(--muted);
+        font-size: 0.8rem;
+        padding: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>📊 Large-Scale Log Analysis — MapReduce Dashboard</h1>
+      <p>
+        Results from a Map → Shuffle/Sort → Reduce pipeline over the sample
+        access log.
+      </p>
+      <div class="badges">
+        <span class="badge" id="b-total"></span>
+        <span class="badge" id="b-users"></span>
+        <span class="badge" id="b-errors"></span>
+        <span class="badge" id="b-backend">Backend: checking…</span>
+        <span class="badge">CO4 · MapReduce</span>
+      </div>
+    </header>
+
+    <div
+      id="errorBanner"
+      style="
+        display: none;
+        max-width: 1200px;
+        margin: 0 auto 16px;
+        padding: 0 24px;
+      "
+    >
+      <div
+        style="
+          background: #3a1620;
+          border: 1px solid var(--accent3);
+          color: #ffb4bd;
+          border-radius: 10px;
+          padding: 14px 18px;
+          font-size: 0.85rem;
+        "
+      >
+        <strong>⚠ Something went wrong:</strong> <span id="errorText"></span>
+      </div>
+    </div>
+
+    <main style="padding-bottom: 0">
+      <div
+        class="card"
+        style="
+          margin-bottom: 14px;
+          display: flex;
+          gap: 14px;
+          align-items: center;
+          flex-wrap: wrap;
+        "
+      >
+        <div style="flex: 1; min-width: 220px">
+          <strong>Run the MapReduce engine</strong>
+          <div style="color: var(--muted); font-size: 0.85rem; margin-top: 2px">
+            Runs the real Map → Shuffle/Sort → Reduce pipeline on the server and
+            loads results here directly.
+          </div>
+        </div>
+        <button
+          id="runSampleBtn"
+          style="
+            background: var(--accent2);
+            color: #0b1220;
+            padding: 9px 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 600;
+          "
+        >
+          ▶ Analyze Sample Log
+        </button>
+        <label
+          style="
+            background: var(--accent);
+            color: #fff;
+            padding: 9px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 600;
+          "
+        >
+          Upload &amp; Analyze Log File
+          <input
+            type="file"
+            id="logFileInput"
+            accept=".log,.txt"
+            style="display: none"
+          />
+        </label>
+        <span
+          id="runStatus"
+          style="font-size: 0.8rem; color: var(--accent2)"
+        ></span>
+      </div>
+
+      <div
+        class="card"
+        style="
+          margin-bottom: 18px;
+          display: flex;
+          gap: 14px;
+          align-items: center;
+          flex-wrap: wrap;
+        "
+      >
+        <div style="flex: 1; min-width: 220px">
+          <strong>Or load pre-generated CSVs</strong>
+          <div style="color: var(--muted); font-size: 0.85rem; margin-top: 2px">
+            For offline use without the backend running — select the 4 CSVs from
+            <code>output/</code>.
+          </div>
+        </div>
+        <label
+          style="
+            background: transparent;
+            color: var(--text);
+            border: 1px solid var(--border);
+            padding: 9px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 600;
+          "
+        >
+          Upload CSVs
+          <input
+            type="file"
+            id="csvInput"
+            accept=".csv"
+            multiple
+            style="display: none"
+          />
+        </label>
+        <button
+          id="resetBtn"
+          style="
+            background: transparent;
+            color: var(--muted);
+            border: 1px solid var(--border);
+            padding: 9px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+          "
+        >
+          Clear results
+        </button>
+        <button
+          id="downloadBtn"
+          style="
+            background: transparent;
+            color: var(--accent2);
+            border: 1px solid var(--accent2);
+            padding: 9px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 600;
+          "
+        >
+          Download CSVs (.zip)
+        </button>
+        <span
+          id="uploadStatus"
+          style="font-size: 0.8rem; color: var(--accent2)"
+        ></span>
+      </div>
+    </main>
+
+    <main>
+      <div class="stats" id="stats"></div>
+
+      <div class="grid">
+        <div class="card">
+          <h2>Most Accessed Pages</h2>
+          <div class="chart-wrap"><canvas id="pagesChart"></canvas></div>
+        </div>
+
+        <div class="card">
+          <h2>Error Occurrences (HTTP Status)</h2>
+          <div class="chart-wrap"><canvas id="errorsChart"></canvas></div>
+        </div>
+
+        <div class="card wide">
+          <h2>Traffic Pattern by Hour of Day</h2>
+          <div class="chart-wrap"><canvas id="hourlyChart"></canvas></div>
+        </div>
+
+        <div class="card wide">
+          <h2>Top 15 Most Active Users (by IP)</h2>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>IP Address</th>
+                  <th>Requests</th>
+                </tr>
+              </thead>
+              <tbody id="usersTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer>
+      Generated from CSV output of the MapReduce log analyzer · Mini Project ·
+      Charts drawn with plain HTML5 Canvas (no external libraries)
+    </footer>
+
+    <script>
+      // ============================================================
+      // Global error banner: make failures VISIBLE instead of silent
+      // ============================================================
+      function showError(msg) {
+        const banner = document.getElementById('errorBanner');
+        const text = document.getElementById('errorText');
+        text.textContent = msg;
+        banner.style.display = 'block';
+      }
+      window.addEventListener('error', (e) =>
+        showError(e.message + ' (line ' + e.lineno + ')'),
+      );
+      window.addEventListener('unhandledrejection', (e) =>
+        showError(String(e.reason)),
+      );
+
+      // ============================================================
+      // Data
+      // ============================================================
+      // No hardcoded/fake data: the dashboard starts empty and only ever
+      // shows numbers that came from an actual MapReduce run (live backend
+      // analysis or a set of real CSVs you upload).
+      const EMPTY = { page: [], error: [], hourly: [], user: [] };
+      let data = {
+        page: EMPTY.page,
+        error: EMPTY.error,
+        hourly: EMPTY.hourly,
+        user: EMPTY.user,
+      };
+
+      // ============================================================
+      // ALL button wiring happens first, before chart-drawing code,
+      // so the buttons keep working even if a chart fails to draw.
+      // ============================================================
+      document
+        .getElementById('csvInput')
+        .addEventListener('change', async (e) => {
+          const files = Array.from(e.target.files);
+          const loaded = [];
+          for (const file of files) {
+            try {
+              const text = await file.text();
+              const rows = parseCSV(text);
+              const kind = classifyAndLoad(rows);
+              if (kind) loaded.push(kind);
+            } catch (err) {
+              console.error('Failed to read', file.name, err);
+              showError('Could not read ' + file.name + ': ' + err.message);
+            }
+          }
+          document.getElementById('uploadStatus').textContent = loaded.length
+            ? `Loaded: ${loaded.join(', ')}`
+            : 'No recognized CSVs found';
+          render();
+        });
+
+      document.getElementById('resetBtn').addEventListener('click', () => {
+        data = {
+          page: EMPTY.page,
+          error: EMPTY.error,
+          hourly: EMPTY.hourly,
+          user: EMPTY.user,
+        };
+        document.getElementById('uploadStatus').textContent = '';
+        document.getElementById('csvInput').value = '';
+        render();
+      });
+
+      document
+        .getElementById('downloadBtn')
+        .addEventListener('click', async () => {
+          const status = document.getElementById('uploadStatus');
+          try {
+            const res = await fetch('/api/download/all');
+            if (!res.ok) {
+              const json = await res.json().catch(() => ({}));
+              throw new Error(
+                json.error ||
+                  'No results on the server yet — run "Upload & Analyze Log File" or the sample run first.',
+              );
+            }
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'log_analysis_results.zip';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            status.style.color = 'var(--accent2)';
+            status.textContent = 'Downloaded log_analysis_results.zip';
+          } catch (err) {
+            status.style.color = 'var(--accent3)';
+            status.textContent = err.message;
+          }
+        });
+
+      function setRunStatus(msg, isError) {
+        const el = document.getElementById('runStatus');
+        el.textContent = msg;
+        el.style.color = isError ? 'var(--accent3)' : 'var(--accent2)';
+      }
+
+      document
+        .getElementById('runSampleBtn')
+        .addEventListener('click', async () => {
+          setRunStatus('Running MapReduce on server…');
+          try {
+            const res = await fetch('/api/analyze/sample', { method: 'POST' });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json.error || 'Server error');
+            data = {
+              page: json.page,
+              error: json.error,
+              hourly: json.hourly,
+              user: json.user,
+            };
+            setRunStatus('Loaded results from live MapReduce run ✓');
+            render();
+          } catch (err) {
+            setRunStatus('Failed: ' + err.message, true);
+            showError(
+              'Could not reach the backend. Make sure you ran "python3 app.py" and opened http://127.0.0.1:5000 (not the file directly). Details: ' +
+                err.message,
+            );
+          }
+        });
+
+      document
+        .getElementById('logFileInput')
+        .addEventListener('change', async (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          setRunStatus(`Uploading ${file.name} and running MapReduce…`);
+          const form = new FormData();
+          form.append('logfile', file);
+          try {
+            const res = await fetch('/api/analyze/upload', {
+              method: 'POST',
+              body: form,
+            });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json.error || 'Server error');
+            data = {
+              page: json.page,
+              error: json.error,
+              hourly: json.hourly,
+              user: json.user,
+            };
+            setRunStatus(`Analyzed ${file.name} ✓`);
+            render();
+          } catch (err) {
+            setRunStatus('Failed: ' + err.message, true);
+            showError(
+              'Could not reach the backend. Make sure you ran "python3 app.py" and opened http://127.0.0.1:5000 (not the file directly). Details: ' +
+                err.message,
+            );
+          }
+          e.target.value = '';
+        });
+
+      // ============================================================
+      // CSV parsing helpers
+      // ============================================================
+      function parseCSV(text) {
+        return text
+          .trim()
+          .split(/\r?\n/)
+          .map((line) => line.split(',').map((c) => c.trim()));
+      }
+      function classifyAndLoad(rows) {
+        const header = rows[0].map((h) => h.toLowerCase());
+        const body = rows.slice(1).filter((r) => r.length >= 2 && r[0] !== '');
+        if (header[0] === 'page') {
+          data.page = body.map((r) => [r[0], parseInt(r[1], 10)]);
+          return 'page_frequency';
+        }
+        if (header[0] === 'status_code') {
+          data.error = body.map((r) => [r[0], parseInt(r[1], 10)]);
+          return 'error_occurrences';
+        }
+        if (header[0] === 'ip_address') {
+          data.user = body
+            .map((r) => [r[0], parseInt(r[1], 10)])
+            .sort((a, b) => b[1] - a[1]);
+          return 'user_activity';
+        }
+        if (header[0] === 'hour') {
+          data.hourly = body
+            .map((r) => [r[0], parseInt(r[1], 10)])
+            .sort((a, b) => a[0].localeCompare(b[0]));
+          return 'hourly_traffic';
+        }
+        return null;
+      }
+
+      // ============================================================
+      // backend health check
+      // ============================================================
+      (async function checkBackend() {
+        const badge = document.getElementById('b-backend');
+        try {
+          const res = await fetch('/api/health', {
+            signal: AbortSignal.timeout(1500),
+          });
+          if (res.ok) {
+            badge.textContent = 'Backend: connected ✓';
+            badge.style.color = 'var(--accent2)';
+          } else {
+            throw new Error('bad response');
+          }
+        } catch {
+          badge.textContent = 'Backend: not running';
+          badge.style.color = 'var(--accent3)';
+        }
+      })();
+
+      // ============================================================
+      // Plain HTML5 Canvas chart renderer — NO external libraries,
+      // NO internet connection required. Handles high-DPI screens.
+      // ============================================================
+      function cssVar(name) {
+        return getComputedStyle(document.documentElement)
+          .getPropertyValue(name)
+          .trim();
+      }
+
+      function setupCanvas(canvas) {
+        const wrap = canvas.parentElement;
+        const dpr = window.devicePixelRatio || 1;
+        const w = wrap.clientWidth,
+          h = wrap.clientHeight;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        return { ctx, w, h };
+      }
+
+      function drawBarChart(canvas, items, color) {
+        const { ctx, w, h } = setupCanvas(canvas);
+        ctx.clearRect(0, 0, w, h);
+        const muted = cssVar('--muted'),
+          text = cssVar('--text');
+        if (!items.length) return;
+        const maxVal = Math.max(...items.map((i) => i[1]), 1);
+        const labelW = 110,
+          rightPad = 44,
+          topPad = 6,
+          barGap = 6;
+        const barH = Math.min(24, (h - topPad) / items.length - barGap);
+        ctx.font = '11px -apple-system, sans-serif';
+        ctx.textBaseline = 'middle';
+        items.forEach((item, i) => {
+          const y = topPad + i * (barH + barGap);
+          const barMaxW = w - labelW - rightPad;
+          const barW = Math.max(2, (item[1] / maxVal) * barMaxW);
+          // label
+          ctx.fillStyle = text;
+          ctx.textAlign = 'right';
+          let label = item[0];
+          if (label.length > 16) label = label.slice(0, 15) + '…';
+          ctx.fillText(label, labelW - 8, y + barH / 2);
+          // bar
+          ctx.fillStyle = color;
+          const radius = Math.min(6, barH / 2);
+          ctx.beginPath();
+          ctx.roundRect(labelW, y, barW, barH, radius);
+          ctx.fill();
+          // value
+          ctx.fillStyle = muted;
+          ctx.textAlign = 'left';
+          ctx.fillText(String(item[1]), labelW + barW + 6, y + barH / 2);
+        });
+      }
+
+      function drawLineChart(canvas, items, color) {
+        const { ctx, w, h } = setupCanvas(canvas);
+        ctx.clearRect(0, 0, w, h);
+        const muted = cssVar('--muted'),
+          border = cssVar('--border');
+        if (!items.length) return;
+        const padL = 34,
+          padR = 10,
+          padT = 10,
+          padB = 22;
+        const plotW = w - padL - padR,
+          plotH = h - padT - padB;
+        const maxVal = Math.max(...items.map((i) => i[1]), 1);
+        const stepX = plotW / (items.length - 1 || 1);
+
+        // gridlines + y labels
+        ctx.strokeStyle = border;
+        ctx.fillStyle = muted;
+        ctx.font = '10px -apple-system, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        const ySteps = 4;
+        for (let s = 0; s <= ySteps; s++) {
+          const val = Math.round((maxVal * s) / ySteps);
+          const y = padT + plotH - (val / maxVal) * plotH;
+          ctx.beginPath();
+          ctx.moveTo(padL, y);
+          ctx.lineTo(w - padR, y);
+          ctx.stroke();
+          ctx.fillText(String(val), padL - 6, y);
+        }
+
+        // x labels (sparse)
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        const labelEvery = Math.ceil(items.length / 8);
+        items.forEach((item, i) => {
+          if (i % labelEvery === 0) {
+            const x = padL + i * stepX;
+            ctx.fillText(item[0], x, h - padB + 4);
+          }
+        });
+
+        // line + fill
+        ctx.beginPath();
+        items.forEach((item, i) => {
+          const x = padL + i * stepX;
+          const y = padT + plotH - (item[1] / maxVal) * plotH;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.lineTo(padL + (items.length - 1) * stepX, padT + plotH);
+        ctx.lineTo(padL, padT + plotH);
+        ctx.closePath();
+        ctx.fillStyle = color + '26'; // ~15% alpha appended hex (works since color is hex)
+        ctx.fill();
+
+        // points
+        ctx.fillStyle = color;
+        items.forEach((item, i) => {
+          const x = padL + i * stepX;
+          const y = padT + plotH - (item[1] / maxVal) * plotH;
+          ctx.beginPath();
+          ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+
+      function drawDoughnutChart(canvas, items, colors) {
+        const { ctx, w, h } = setupCanvas(canvas);
+        ctx.clearRect(0, 0, w, h);
+        const text = cssVar('--text');
+        if (!items.length) return;
+        const total = items.reduce((s, i) => s + i[1], 0) || 1;
+        const legendW = 110;
+        const cx = (w - legendW) / 2,
+          cy = h / 2;
+        const r = Math.min(cx, cy) - 14;
+        const innerR = r * 0.6;
+        let angle = -Math.PI / 2;
+
+        items.forEach((item, i) => {
+          const slice = (item[1] / total) * Math.PI * 2;
+          const color = colors[i % colors.length];
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.arc(cx, cy, r, angle, angle + slice);
+          ctx.closePath();
+          ctx.fillStyle = color;
+          ctx.fill();
+          angle += slice;
+        });
+        // punch the hole
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.beginPath();
+        ctx.arc(cx, cy, innerR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+
+        // legend
+        ctx.font = '11px -apple-system, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const legendX = w - legendW + 6;
+        let legendY = h / 2 - (items.length * 18) / 2 + 9;
+        items.forEach((item, i) => {
+          ctx.fillStyle = colors[i % colors.length];
+          ctx.fillRect(legendX, legendY - 5, 10, 10);
+          ctx.fillStyle = text;
+          ctx.fillText(`${item[0]} (${item[1]})`, legendX + 16, legendY);
+          legendY += 18;
+        });
+      }
+
+      // ============================================================
+      // Render: updates badges, stats, tables, and redraws all charts
+      // ============================================================
+      function render() {
+        const totalHits = data.hourly.reduce((s, r) => s + r[1], 0);
+        const totalErrors = data.error.reduce((s, r) => s + r[1], 0);
+        const hasData =
+          data.page.length ||
+          data.error.length ||
+          data.hourly.length ||
+          data.user.length;
+        document.getElementById('b-total').textContent =
+          `${totalHits.toLocaleString()} total requests`;
+        document.getElementById('b-users').textContent =
+          `${data.user.length} users`;
+        document.getElementById('b-errors').textContent =
+          `${totalErrors.toLocaleString()} error responses`;
+
+        if (!hasData) {
+          document.getElementById('stats').innerHTML =
+            `<div class="stat" style="grid-column: 1 / -1">
+              <div class="label">No data yet — click "Upload &amp; Analyze Log File" above, or "Upload CSVs" below, to see results.</div>
+            </div>`;
+          drawBarChart(
+            document.getElementById('pagesChart'),
+            [],
+            cssVar('--accent'),
+          );
+          drawDoughnutChart(document.getElementById('errorsChart'), [], []);
+          drawLineChart(
+            document.getElementById('hourlyChart'),
+            [],
+            cssVar('--accent4'),
+          );
+          document.getElementById('usersTable').innerHTML = '';
+          return;
+        }
+
+        const stats = [
+          { num: data.page[0] ? data.page[0][0] : '—', label: 'Top page' },
+          {
+            num: totalErrors.toLocaleString(),
+            label: 'Total errors (4xx/5xx)',
+          },
+          {
+            num: data.hourly.length
+              ? data.hourly.reduce((a, b) => (b[1] > a[1] ? b : a))[0] + ':00'
+              : '—',
+            label: 'Peak traffic hour',
+          },
+          {
+            num: data.user[0] ? data.user[0][1] : '—',
+            label: 'Requests by busiest user',
+          },
+        ];
+        document.getElementById('stats').innerHTML = stats
+          .map(
+            (s) =>
+              `<div class="stat"><div class="num">${s.num}</div><div class="label">${s.label}</div></div>`,
+          )
+          .join('');
+
+        drawBarChart(
+          document.getElementById('pagesChart'),
+          data.page.slice(0, 10),
+          cssVar('--accent'),
+        );
+        drawDoughnutChart(document.getElementById('errorsChart'), data.error, [
+          cssVar('--accent3'),
+          '#e08a4f',
+          cssVar('--accent4'),
+          '#4fa8e0',
+          '#e0c34f',
+        ]);
+        drawLineChart(
+          document.getElementById('hourlyChart'),
+          data.hourly,
+          cssVar('--accent4'),
+        );
+
+        document.getElementById('usersTable').innerHTML = data.user
+          .slice(0, 15)
+          .map(
+            (r, i) =>
+              `<tr><td>${i + 1}</td><td>${r[0]}</td><td>${r[1]}</td></tr>`,
+          )
+          .join('');
+      }
+
+      window.addEventListener('resize', render);
+
+      try {
+        render();
+      } catch (err) {
+        showError(err.message);
+      }
+    </script>
+  </body>
+</html>
